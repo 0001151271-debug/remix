@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Spotify Remix Lab</title>
+    <style>
+        :root { --spotify-green: #1DB954; --dark-bg: #121212; --panel-bg: #1e1e1e; }
+        body { background: var(--dark-bg); color: white; font-family: 'Helvetica Neue', sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        
+        .header { text-align: center; margin-bottom: 30px; }
+        .spotify-btn { background: var(--spotify-green); color: black; border: none; padding: 12px 25px; border-radius: 25px; font-weight: bold; cursor: pointer; margin-bottom: 20px; }
+        
+        .main-container { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
+        
+        /* Mixer Estilo */
+        .mixer { display: flex; gap: 20px; background: var(--panel-bg); padding: 20px; border-radius: 15px; border: 1px solid #333; }
+        .deck { width: 220px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+        .platter { width: 150px; height: 150px; border: 4px solid var(--spotify-green); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 40px; }
+        .playing { animation: rotate 2s linear infinite; }
+        @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        
+        /* Playlist Estilo */
+        .playlist-side { background: var(--panel-bg); width: 300px; padding: 20px; border-radius: 15px; max-height: 500px; overflow-y: auto; }
+        .track-item { padding: 10px; border-bottom: 1px solid #333; cursor: pointer; font-size: 14px; }
+        .track-item:hover { background: #282828; }
+        .track-item small { color: var(--spotify-green); }
+
+        input[type="range"] { width: 100%; accent-color: var(--spotify-green); }
+        .controls label { font-size: 11px; color: #888; display: block; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>Spotify Remix Lab</h1>
+        <button class="spotify-btn" onclick="loginSpotify()">CONECTAR COM SPOTIFY</button>
+    </div>
+
+    <div class="main-container">
+        <div class="playlist-side">
+            <h3>Sua Playlist</h3>
+            <div id="track-list">Conecte para ver suas músicas...</div>
+        </div>
+
+        <div class="mixer">
+            <div class="deck">
+                <input type="file" id="file-a" accept="audio/*" onchange="loadAudio(event, 'a')">
+                <div id="platter-a" class="platter">💿</div>
+                <div class="controls">
+                    <label>VOLUME DECK A</label>
+                    <input type="range" id="vol-a" min="0" max="1" step="0.01" value="0.8" oninput="updateAudio('a')">
+                    <label>PITCH / BPM</label>
+                    <input type="range" id="pitch-a" min="0.5" max="1.5" step="0.01" value="1" oninput="updateAudio('a')">
+                    <button class="spotify-btn" style="width:100%; margin-top:10px" onclick="toggleDeck('a')">PLAY/PAUSE A</button>
+                </div>
+            </div>
+
+            <div class="deck">
+                <input type="file" id="file-b" accept="audio/*" onchange="loadAudio(event, 'b')">
+                <div id="platter-b" class="platter">💿</div>
+                <div class="controls">
+                    <label>VOLUME DECK B</label>
+                    <input type="range" id="vol-b" min="0" max="1" step="0.01" value="0.8" oninput="updateAudio('b')">
+                    <label>PITCH / BPM</label>
+                    <input type="range" id="pitch-b" min="0.5" max="1.5" step="0.01" value="1" oninput="updateAudio('b')">
+                    <button class="spotify-btn" style="width:100%; margin-top:10px" onclick="toggleDeck('b')">PLAY/PAUSE B</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIGURAÇÃO SPOTIFY ---
+        const CLIENT_ID = 'SEU_CLIENT_ID_AQUI'; // <--- INSIRA SEU ID AQUI
+        const REDIRECT_URI = window.location.href.split('?')[0]; 
+        const SCOPES = 'playlist-read-private user-library-read';
+
+        function loginSpotify() {
+            const url = `https://accounts.spotify.com/authorize?client_id=${CLIENT_ID}&response_type=token&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES)}`;
+            window.location = url;
+        }
+
+        // Pegar Token da URL
+        const params = new URLSearchParams(window.location.hash.substring(1));
+        const token = params.get('access_token');
+
+        if (token) {
+            fetchPlaylists();
+        }
+
+        async function fetchPlaylists() {
+            const res = await fetch('https://api.spotify.com/v1/me/tracks?limit=20', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            renderTracks(data.items);
+        }
+
+        function renderTracks(items) {
+            const container = document.getElementById('track-list');
+            container.innerHTML = items.map(item => `
+                <div class="track-item">
+                    <strong>${item.track.name}</strong><br>
+                    <small>Artista: ${item.track.artists[0].name}</small>
+                </div>
+            `).join('');
+        }
+
+        // --- LÓGICA DO MIXER (WEB AUDIO API) ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const decks = {
+            a: { buffer: null, source: null, gain: audioCtx.createGain(), playing: false },
+            b: { buffer: null, source: null, gain: audioCtx.createGain(), playing: false }
+        };
+
+        decks.a.gain.connect(audioCtx.destination);
+        decks.b.gain.connect(audioCtx.destination);
+
+        async function loadAudio(e, id) {
+            const file = e.target.files[0];
+            const buffer = await file.arrayBuffer();
+            decks[id].buffer = await audioCtx.decodeAudioData(buffer);
+            alert("Áudio carregado no Deck " + id.toUpperCase());
+        }
+
+        function toggleDeck(id) {
+            const d = decks[id];
+            const platter = document.getElementById(`platter-${id}`);
+            
+            if (d.playing) {
+                d.source.stop();
+                d.playing = false;
+                platter.classList.remove('playing');
+            } else {
+                if (!d.buffer) return alert("Carregue um arquivo MP3 primeiro!");
+                d.source = audioCtx.createBufferSource();
+                d.source.buffer = d.buffer;
+                d.source.loop = true;
+                d.source.connect(d.gain);
+                updateAudio(id);
+                d.source.start(0);
+                d.playing = true;
+                platter.classList.add('playing');
+            }
+        }
+
+        function updateAudio(id) {
+            const d = decks[id];
+            const vol = document.getElementById(`vol-${id}`).value;
+            const pitch = document.getElementById(`pitch-${id}`).value;
+            d.gain.gain.value = vol;
+            if (d.source) d.source.playbackRate.value = pitch;
+        }
+    </script>
+</body>
+</html>
